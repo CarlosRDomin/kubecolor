@@ -12,14 +12,27 @@ import (
 type TablePrinter struct {
 	WithHeader     bool
 	DarkBackground bool
-	ColorDeciderFn func(index int, column string) (color.Color, bool)
+	ColorDeciderFn func(index int, column string, header string) (color.Color, bool)
 
 	isFirstLine   bool
+	headerTitles  []string
 	indexColorMap map[int]color.Color
 	tempColors    []color.Color
 }
 
 func NewTablePrinter(withHeader, darkBackground bool, colorDeciderFn func(index int, column string) (color.Color, bool)) *TablePrinter {
+	return &TablePrinter{
+		WithHeader:     withHeader,
+		DarkBackground: darkBackground,
+		ColorDeciderFn: func(index int, column string, header string) (color.Color, bool) {
+			return colorDeciderFn(index, column)
+		},
+		indexColorMap: map[int]color.Color{},
+		tempColors:    []color.Color{},
+	}
+}
+
+func NewTablePrinterWithHeader(withHeader, darkBackground bool, colorDeciderFn func(index int, column string, header string) (color.Color, bool)) *TablePrinter {
 	return &TablePrinter{
 		WithHeader:     withHeader,
 		DarkBackground: darkBackground,
@@ -37,6 +50,7 @@ func (tp *TablePrinter) Print(r io.Reader, w io.Writer) {
 		if tp.isHeader(line) {
 			fmt.Fprintf(w, "%s\n", color.Apply(line, getHeaderColorByBackground(tp.DarkBackground)))
 			tp.isFirstLine = false
+			tp.headerTitles = spaces.Split(line, -1)
 			continue
 		}
 
@@ -58,6 +72,13 @@ func (tp *TablePrinter) isHeader(line string) bool {
 	// replicaset.apps/nginx-6799fc88d8   3         3         3       19d
 	isEveryCharacterUpper := strings.ToUpper(line) == line
 	return (tp.WithHeader && tp.isFirstLine) || isEveryCharacterUpper
+}
+
+func (tp *TablePrinter) getHeaderAt(i int) string {
+	if len(tp.headerTitles) > i {
+		return tp.headerTitles[i]
+	}
+	return ""
 }
 
 // printTableFormat prints a line to w in kubectl "table" Format.
@@ -98,7 +119,7 @@ func (tp *TablePrinter) printLineAsTableFormat(w io.Writer, line string, colorsP
 
 		c := tp.decideColorForTable(index, colorsPreset)
 		if tp.ColorDeciderFn != nil {
-			if cc, ok := tp.ColorDeciderFn(i, column); ok {
+			if cc, ok := tp.ColorDeciderFn(i, column, tp.getHeaderAt(i)); ok {
 				c = cc // prior injected deciderFn result
 			}
 		}
@@ -116,6 +137,8 @@ func (tp *TablePrinter) printLineAsTableFormat(w io.Writer, line string, colorsP
 }
 
 func (tp *TablePrinter) decideColorForTable(index int, colors []color.Color) color.Color {
+	// TODO: Use tp.headerTitles[index] to allow overriding coloring based on column header
+
 	if len(tp.tempColors) == 0 {
 		tp.tempColors = make([]color.Color, len(colors))
 		copy(tp.tempColors, colors)
